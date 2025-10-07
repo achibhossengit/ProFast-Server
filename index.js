@@ -1,7 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -41,6 +41,17 @@ async function run() {
       }
     });
 
+    app.get("/parcels/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await parcelsColl.findOne(query);
+        return res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: "Internal server error" });
+      }
+    });
+
     app.post("/parcels", async (req, res) => {
       try {
         const parcelData = req.body;
@@ -49,6 +60,35 @@ async function run() {
         res.status(201).send(result);
       } catch (err) {
         res.status(500).send({ error: "Failed to create parcel" });
+      }
+    });
+
+    app.put("/parcels/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedData = req.body;
+        delete updatedData._id;
+        const query = { _id: new ObjectId(id) };
+        const result = await parcelsColl.updateOne(query, {
+          $set: updatedData,
+        });
+        return res.send(result);
+      } catch (error) {
+        console.log(error);
+        return res.status(500).send({ error: "Failed to update parcel!" });
+      }
+    });
+
+    app.delete("/parcels/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await parcelsColl.deleteOne(query);
+        return res.send(result);
+      } catch (error) {
+        return res
+          .status(500)
+          .send({ error: "Something went wrong to delete parcel!" });
       }
     });
 
