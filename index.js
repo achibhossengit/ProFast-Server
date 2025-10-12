@@ -4,6 +4,7 @@ const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const admin = require("firebase-admin");
 const serviceAccount = require("./serviceAccountKey.json");
+const stripe = require("stripe")(process.env.STRIPE_SECRATE_KEY);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -46,7 +47,6 @@ const getUserEmail = (req, res) => {
   return email;
 };
 
-
 // MongoDB connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.2dlckac.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 const client = new MongoClient(uri, {
@@ -62,16 +62,89 @@ async function run() {
     await client.connect();
     const db = client.db("ProFastDB");
     const parcelsColl = db.collection("parcels");
+    const paymentsColl = db.collection("payments");
 
     // test route
     app.get("/", (req, res) => {
       res.send("ProFast server is running ");
     });
 
+    // stripe payment apis
+    app.post("/create-payment-intent", async (req, res) => {
+      const amount = req.body.amountInCents;
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "usd",
+        automatic_payment_methods: {
+          enabled: true,
+        },
+      });
+
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
+    });
+
+    app.post("/payments", verifyFirebaseToken, async (req, res) => {
+      try {
+        const email = getUserEmail(req, res);
+        const {
+          parcelId,
+          transactionId,
+          amount,
+          currency,
+          status,
+          paymentMethod,
+        } = req.body;
+
+        const newPayment = {
+          userEmail: email,
+          parcelId,
+          transactionId,
+          amount,
+          currency,
+          status,
+          paymentMethod,
+          createdAt: new Date(),
+        };
+
+        const updateResult = await parcelsColl.updateOne({
+          _id: new ObjectId(parcelId)
+        }, {
+          $set: {payment_status: 'paid'}
+        })
+
+        const result = await paymentsColl.insertOne(newPayment);
+        res.status(201).send({
+          message: "Payment history saved successfully",
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        console.error("Error saving payment:", error);
+        res.status(500).send({ error: "Failed to save payment history" });
+      }
+    });
+
+    // GET: Fetch all payments for logged-in user
+    app.get("/payments", verifyFirebaseToken, async (req, res) => {
+      try {
+        const email = getUserEmail(req, res);
+        const query = { userEmail: email };
+        const payments = await paymentsColl
+          .find(query)
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.status(200).send(payments);
+      } catch (error) {
+        console.error("Error fetching payments:", error);
+        res.status(500).send({ error: "Failed to fetch payments" });
+      }
+    });
+
     // parcel related api
     app.get("/parcels", verifyFirebaseToken, async (req, res) => {
       try {
-        const email = getUserEmail(req, res)
+        const email = getUserEmail(req, res);
         const query = { created_by: email };
         const parcels = await parcelsColl.find(query).toArray();
         return res.status(200).send(parcels);
@@ -82,7 +155,7 @@ async function run() {
 
     app.get("/parcels/:id", verifyFirebaseToken, async (req, res) => {
       try {
-        const email = getUserEmail(req, res)
+        const email = getUserEmail(req, res);
         const id = req.params.id;
         const query = { _id: new ObjectId(id), created_by: email };
         const result = await parcelsColl.findOne(query);
@@ -94,7 +167,7 @@ async function run() {
 
     app.post("/parcels", verifyFirebaseToken, async (req, res) => {
       try {
-        const email = getUserEmail(req, res)
+        const email = getUserEmail(req, res);
         const parcelData = {
           ...req.body,
           created_by: email,
@@ -109,7 +182,7 @@ async function run() {
 
     app.put("/parcels/:id", verifyFirebaseToken, async (req, res) => {
       try {
-        const email = getUserEmail(req, res)
+        const email = getUserEmail(req, res);
         const id = req.params.id;
         const updatedData = req.body;
         delete updatedData._id;
@@ -126,7 +199,7 @@ async function run() {
 
     app.delete("/parcels/:id", verifyFirebaseToken, async (req, res) => {
       try {
-        const email = getUserEmail(req, res)
+        const email = getUserEmail(req, res);
         const id = req.params.id;
         const query = { _id: new ObjectId(id), created_by: email };
         const result = await parcelsColl.deleteOne(query);
