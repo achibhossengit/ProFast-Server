@@ -4,7 +4,7 @@ const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const admin = require("firebase-admin");
 const serviceAccount = require("./serviceAccountKey.json");
-const stripe = require("stripe")(process.env.STRIPE_SECRATE_KEY);
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -61,12 +61,42 @@ async function run() {
   try {
     await client.connect();
     const db = client.db("ProFastDB");
+    const usersColl = db.collection("users");
     const parcelsColl = db.collection("parcels");
     const paymentsColl = db.collection("payments");
 
     // test route
     app.get("/", (req, res) => {
       res.send("ProFast server is running ");
+    });
+
+    // users
+    app.post("/users", async (req, res) => {
+      try {
+        const { email, role = "user" } = req.body;
+        const alreadyExists = await usersColl.findOne({ email });
+        if (alreadyExists) {
+          await usersColl.updateOne(
+            { email },
+            {
+              $set: { lastLoggedIn: new Date().toISOString() },
+            }
+          );
+          return res.status(200).send({ message: "User already exists" });
+        }
+
+        const newUser = {
+          email,
+          role,
+          createdAt: new Date().toISOString(),
+          lastLoggedIn: new Date().toISOString(),
+        };
+
+        const result = await usersColl.insertOne(newUser);
+        return res.send(result);
+      } catch (error) {
+        console.log(error);
+      }
     });
 
     // stripe payment apis
@@ -108,11 +138,14 @@ async function run() {
           createdAt: new Date(),
         };
 
-        const updateResult = await parcelsColl.updateOne({
-          _id: new ObjectId(parcelId)
-        }, {
-          $set: {payment_status: 'paid'}
-        })
+        const updateResult = await parcelsColl.updateOne(
+          {
+            _id: new ObjectId(parcelId),
+          },
+          {
+            $set: { payment_status: "paid" },
+          }
+        );
 
         const result = await paymentsColl.insertOne(newPayment);
         res.status(201).send({
