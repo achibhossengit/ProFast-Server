@@ -143,16 +143,37 @@ async function run() {
     });
 
     app.patch("/riders/:id", verifyFirebaseToken, async (req, res) => {
+      const { id } = req.params;
+      const { status } = req.query;
+
+      if (!["active", "deactive"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status value" });
+      }
+
       try {
-        const id = req.params.id;
-        const status = req.query.status;
-        const result = await ridersColl.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { status } }
-        );
-        res.send(result);
+        const query = { _id: new ObjectId(id) };
+        const riderUser = await ridersColl.findOne(query);
+
+        if (!riderUser) {
+          return res.status(404).json({ error: "Rider not found" });
+        }
+
+        const { email } = riderUser;
+        const role = status === "active" ? "rider" : "user";
+
+        const updates = [
+          ridersColl.updateOne(query, { $set: { status } }),
+          email
+            ? usersColl.updateOne({ email }, { $set: { role } })
+            : Promise.resolve(),
+        ];
+
+        const [riderUpdateResult] = await Promise.all(updates);
+
+        res.json({ success: true, updated: riderUpdateResult.modifiedCount });
       } catch (error) {
-        res.status(500).send({ error: "Failed to update rider status" });
+        console.error("Error updating rider:", error);
+        res.status(500).json({ error: "Internal server error" });
       }
     });
 
