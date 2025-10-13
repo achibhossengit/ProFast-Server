@@ -64,6 +64,7 @@ async function run() {
     const usersColl = db.collection("users");
     const parcelsColl = db.collection("parcels");
     const paymentsColl = db.collection("payments");
+    const ridersColl = db.collection("riders");
 
     // test route
     app.get("/", (req, res) => {
@@ -96,6 +97,72 @@ async function run() {
         return res.send(result);
       } catch (error) {
         console.log(error);
+      }
+    });
+
+    // rider applications
+    app.post("/riders", verifyFirebaseToken, async (req, res) => {
+      try {
+        const email = getUserEmail(req, res);
+
+        // Check if rider already applied
+        const existing = await ridersColl.findOne({ email });
+        if (existing) {
+          return res.status(409).json({ message: "You have already applied." });
+        }
+
+        const newRider = req.body;
+        newRider.appliedAt = new Date().toISOString();
+
+        const result = await ridersColl.insertOne(newRider);
+        res.status(201).json(result);
+      } catch (error) {
+        console.error("Error submitting rider application:", error);
+        res.status(500).json({ message: "Failed to submit application" });
+      }
+    });
+
+    app.get("/riders", verifyFirebaseToken, async (req, res) => {
+      try {
+        const status = req.query.status;
+
+        let query = {};
+
+        if (status) {
+          query = { status };
+        } else {
+          query = { status: { $ne: "pending" } }; // exclude pending
+        }
+
+        const riders = await ridersColl.find(query).toArray();
+        res.status(200).send(riders);
+      } catch (error) {
+        console.error("Error fetching riders:", error);
+        res.status(500).send({ error: "Failed to fetch riders" });
+      }
+    });
+
+    app.patch("/riders/:id", verifyFirebaseToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const status = req.query.status;
+        const result = await ridersColl.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status } }
+        );
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to update rider status" });
+      }
+    });
+
+    app.delete("/riders/:id", verifyFirebaseToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await ridersColl.deleteOne({ _id: new ObjectId(id) });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to delete rider" });
       }
     });
 
