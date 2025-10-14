@@ -57,7 +57,6 @@ async function run() {
       const accessToken = authHeader.split(" ")[1];
       try {
         const decodedToken = await admin.auth().verifyIdToken(accessToken);
-        // console.log(decodedToken);
         const { email } = decodedToken;
         const authUser = await usersColl.findOne(
           { email },
@@ -65,13 +64,13 @@ async function run() {
         );
 
         if (!authUser) {
-          return res.status(404).json({ error: "User not found." });
+          return res.status(401).json({ error: "User not found." });
         }
         req.user = decodedToken;
         req.user.role = authUser.role;
       } catch (error) {
         console.error("Token verification Failed: ", error);
-        return res.status(403).json({ error: "Invalid Token" });
+        return res.status(401).json({ error: "Invalid Token" });
       }
 
       next();
@@ -81,32 +80,34 @@ async function run() {
       try {
         const role = req.user.role;
         if (!role || role !== "admin")
-          return res.status(403).send({ message: "Forbidden access" });
+          return res.status(403).json({ message: "Forbidden access" });
 
         next();
       } catch (error) {
-        return res.status(401).send({ message: "Internal Server Error" });
+        return res.status(500).json({ message: "Internal Server Error" });
       }
     };
 
     // test route
     app.get("/", (req, res) => {
-      res.send("ProFast server is running ");
+      res.status(200).send("ProFast server is running");
     });
 
     // users
     app.post("/users", async (req, res) => {
       try {
         const { email, role = "user" } = req.body;
+        if (!email) {
+          return res.status(400).json({ error: "Email is required" });
+        }
+
         const alreadyExists = await usersColl.findOne({ email });
         if (alreadyExists) {
           await usersColl.updateOne(
             { email },
-            {
-              $set: { lastLoggedIn: new Date().toISOString() },
-            }
+            { $set: { lastLoggedIn: new Date().toISOString() } }
           );
-          return res.status(200).send({ message: "User already exists" });
+          return res.status(200).json({ message: "User already exists" });
         }
 
         const newUser = {
@@ -117,17 +118,17 @@ async function run() {
         };
 
         const result = await usersColl.insertOne(newUser);
-        return res.send(result);
+        return res.status(201).json(result);
       } catch (error) {
-        console.log(error);
+        console.error(error);
+        return res.status(500).json({ error: "Failed to create user" });
       }
     });
 
     app.get("/user-role", verifyFirebaseToken, async (req, res) => {
       try {
         const userRole = req.user.role;
-
-        return res.status(200).send(userRole);
+        return res.status(200).json(userRole);
       } catch (error) {
         console.error("Error fetching user role:", error);
         return res.status(500).json({ error: "Internal server error." });
@@ -139,7 +140,6 @@ async function run() {
       try {
         const email = getUserEmail(req, res);
 
-        // Check if rider already applied
         const existing = await ridersColl.findOne({ email });
         if (existing) {
           return res.status(409).json({ message: "You have already applied." });
@@ -159,20 +159,19 @@ async function run() {
     app.get("/riders", verifyFirebaseToken, verifryAdmin, async (req, res) => {
       try {
         const status = req.query.status;
-
         let query = {};
 
         if (status) {
           query = { status };
         } else {
-          query = { status: { $ne: "pending" } }; // exclude pending
+          query = { status: { $ne: "pending" } };
         }
 
         const riders = await ridersColl.find(query).toArray();
-        res.status(200).send(riders);
+        res.status(200).json(riders);
       } catch (error) {
         console.error("Error fetching riders:", error);
-        res.status(500).send({ error: "Failed to fetch riders" });
+        res.status(500).json({ error: "Failed to fetch riders" });
       }
     });
 
@@ -207,8 +206,10 @@ async function run() {
           ];
 
           const [riderUpdateResult] = await Promise.all(updates);
-
-          res.json({ success: true, updated: riderUpdateResult.modifiedCount });
+          res.status(200).json({
+            success: true,
+            updated: riderUpdateResult.modifiedCount,
+          });
         } catch (error) {
           console.error("Error updating rider:", error);
           res.status(500).json({ error: "Internal server error" });
@@ -220,26 +221,38 @@ async function run() {
       try {
         const id = req.params.id;
         const result = await ridersColl.deleteOne({ _id: new ObjectId(id) });
-        res.send(result);
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ error: "Rider not found" });
+        }
+        res.status(200).json({ message: "Rider deleted successfully" });
       } catch (error) {
-        res.status(500).send({ error: "Failed to delete rider" });
+        res.status(500).json({ error: "Failed to delete rider" });
       }
     });
 
     // stripe payment apis
     app.post("/create-payment-intent", async (req, res) => {
-      const amount = req.body.amountInCents;
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: amount,
-        currency: "usd",
-        automatic_payment_methods: {
-          enabled: true,
-        },
-      });
+      try {
+        const amount = req.body.amountInCents;
+        if (!amount) {
+          return res.status(400).json({ error: "Amount is required" });
+        }
 
-      res.send({
-        clientSecret: paymentIntent.client_secret,
-      });
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: "usd",
+          automatic_payment_methods: {
+            enabled: true,
+          },
+        });
+
+        res.status(200).json({
+          clientSecret: paymentIntent.client_secret,
+        });
+      } catch (error) {
+        console.error("Error creating payment intent:", error);
+        res.status(500).json({ error: "Failed to create payment intent" });
+      }
     });
 
     app.post("/payments", verifyFirebaseToken, async (req, res) => {
@@ -254,6 +267,10 @@ async function run() {
           paymentMethod,
         } = req.body;
 
+        if (!parcelId || !transactionId || !amount) {
+          return res.status(400).json({ error: "Missing payment details" });
+        }
+
         const newPayment = {
           userEmail: email,
           parcelId,
@@ -265,27 +282,22 @@ async function run() {
           createdAt: new Date(),
         };
 
-        const updateResult = await parcelsColl.updateOne(
-          {
-            _id: new ObjectId(parcelId),
-          },
-          {
-            $set: { payment_status: "paid" },
-          }
+        await parcelsColl.updateOne(
+          { _id: new ObjectId(parcelId) },
+          { $set: { payment_status: "paid" } }
         );
 
         const result = await paymentsColl.insertOne(newPayment);
-        res.status(201).send({
+        res.status(201).json({
           message: "Payment history saved successfully",
           insertedId: result.insertedId,
         });
       } catch (error) {
         console.error("Error saving payment:", error);
-        res.status(500).send({ error: "Failed to save payment history" });
+        res.status(500).json({ error: "Failed to save payment history" });
       }
     });
 
-    // GET: Fetch all payments for logged-in user
     app.get("/payments", verifyFirebaseToken, async (req, res) => {
       try {
         const email = getUserEmail(req, res);
@@ -294,10 +306,10 @@ async function run() {
           .find(query)
           .sort({ createdAt: -1 })
           .toArray();
-        res.status(200).send(payments);
+        res.status(200).json(payments);
       } catch (error) {
         console.error("Error fetching payments:", error);
-        res.status(500).send({ error: "Failed to fetch payments" });
+        res.status(500).json({ error: "Failed to fetch payments" });
       }
     });
 
@@ -307,9 +319,9 @@ async function run() {
         const email = getUserEmail(req, res);
         const query = { created_by: email };
         const parcels = await parcelsColl.find(query).toArray();
-        return res.status(200).send(parcels);
+        res.status(200).json(parcels);
       } catch (err) {
-        return res.status(500).send({ error: "Failed to fetch parcels" });
+        res.status(500).json({ error: "Failed to fetch parcels" });
       }
     });
 
@@ -319,9 +331,12 @@ async function run() {
         const id = req.params.id;
         const query = { _id: new ObjectId(id), created_by: email };
         const result = await parcelsColl.findOne(query);
-        return res.send(result);
+        if (!result) {
+          return res.status(404).json({ error: "Parcel not found" });
+        }
+        res.status(200).json(result);
       } catch (error) {
-        res.status(500).send({ error: "Internal server error" });
+        res.status(500).json({ error: "Internal server error" });
       }
     });
 
@@ -334,9 +349,9 @@ async function run() {
         };
 
         const result = await parcelsColl.insertOne(parcelData);
-        res.status(201).send(result);
+        res.status(201).json(result);
       } catch (err) {
-        res.status(500).send({ error: "Failed to create parcel" });
+        res.status(500).json({ error: "Failed to create parcel" });
       }
     });
 
@@ -350,10 +365,13 @@ async function run() {
         const result = await parcelsColl.updateOne(query, {
           $set: updatedData,
         });
-        return res.send(result);
+        if (result.matchedCount === 0) {
+          return res.status(404).json({ error: "Parcel not found" });
+        }
+        res.status(200).json(result);
       } catch (error) {
-        console.log(error);
-        return res.status(500).send({ error: "Failed to update parcel!" });
+        console.error(error);
+        res.status(500).json({ error: "Failed to update parcel!" });
       }
     });
 
@@ -363,11 +381,14 @@ async function run() {
         const id = req.params.id;
         const query = { _id: new ObjectId(id), created_by: email };
         const result = await parcelsColl.deleteOne(query);
-        return res.send(result);
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ error: "Parcel not found" });
+        }
+        res.status(200).json({ message: "Parcel deleted successfully" });
       } catch (error) {
-        return res
-          .status(500)
-          .send({ error: "Something went wrong to delete parcel!" });
+        res.status(500).json({
+          error: "Something went wrong while deleting parcel!",
+        });
       }
     });
 
