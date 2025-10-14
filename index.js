@@ -17,26 +17,6 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-const verifyFirebaseToken = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Missing or malformed token" });
-  }
-
-  const accessToken = authHeader.split(" ")[1];
-  try {
-    const decodedToken = await admin.auth().verifyIdToken(accessToken);
-    // console.log(decodedToken);
-    req.user = decodedToken;
-  } catch (error) {
-    console.error("Token verification Failed: ", error);
-    return res.status(403).json({ error: "Invalid Token" });
-  }
-
-  next();
-};
-
 // Utility Function
 const getUserEmail = (req, res) => {
   const email = req.user?.email;
@@ -65,6 +45,49 @@ async function run() {
     const parcelsColl = db.collection("parcels");
     const paymentsColl = db.collection("payments");
     const ridersColl = db.collection("riders");
+
+    // custom middleware
+    const verifyFirebaseToken = async (req, res, next) => {
+      const authHeader = req.headers.authorization;
+
+      if (!authHeader?.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Missing or malformed token" });
+      }
+
+      const accessToken = authHeader.split(" ")[1];
+      try {
+        const decodedToken = await admin.auth().verifyIdToken(accessToken);
+        // console.log(decodedToken);
+        const { email } = decodedToken;
+        const authUser = await usersColl.findOne(
+          { email },
+          { projection: { role: 1 } }
+        );
+
+        if (!authUser) {
+          return res.status(404).json({ error: "User not found." });
+        }
+        req.user = decodedToken;
+        req.user.role = authUser.role;
+      } catch (error) {
+        console.error("Token verification Failed: ", error);
+        return res.status(403).json({ error: "Invalid Token" });
+      }
+
+      next();
+    };
+
+    const verifryAdmin = async (req, res, next) => {
+      try {
+        const role = req.user.role;
+        if (!role || role !== "admin")
+          return res.status(403).send({ message: "Forbidden access" });
+
+        next();
+      } catch (error) {
+        return res.status(401).send({ message: "Internal Server Error" });
+      }
+    };
 
     // test route
     app.get("/", (req, res) => {
@@ -100,6 +123,17 @@ async function run() {
       }
     });
 
+    app.get("/user-role", verifyFirebaseToken, async (req, res) => {
+      try {
+        const userRole = req.user.role;
+
+        return res.status(200).send(userRole);
+      } catch (error) {
+        console.error("Error fetching user role:", error);
+        return res.status(500).json({ error: "Internal server error." });
+      }
+    });
+
     // rider applications
     app.post("/riders", verifyFirebaseToken, async (req, res) => {
       try {
@@ -122,7 +156,7 @@ async function run() {
       }
     });
 
-    app.get("/riders", verifyFirebaseToken, async (req, res) => {
+    app.get("/riders", verifyFirebaseToken, verifryAdmin, async (req, res) => {
       try {
         const status = req.query.status;
 
@@ -142,40 +176,45 @@ async function run() {
       }
     });
 
-    app.patch("/riders/:id", verifyFirebaseToken, async (req, res) => {
-      const { id } = req.params;
-      const { status } = req.query;
+    app.patch(
+      "/riders/:id",
+      verifyFirebaseToken,
+      verifryAdmin,
+      async (req, res) => {
+        const { id } = req.params;
+        const { status } = req.query;
 
-      if (!["active", "deactive"].includes(status)) {
-        return res.status(400).json({ error: "Invalid status value" });
-      }
-
-      try {
-        const query = { _id: new ObjectId(id) };
-        const riderUser = await ridersColl.findOne(query);
-
-        if (!riderUser) {
-          return res.status(404).json({ error: "Rider not found" });
+        if (!["active", "deactive"].includes(status)) {
+          return res.status(400).json({ error: "Invalid status value" });
         }
 
-        const { email } = riderUser;
-        const role = status === "active" ? "rider" : "user";
+        try {
+          const query = { _id: new ObjectId(id) };
+          const riderUser = await ridersColl.findOne(query);
 
-        const updates = [
-          ridersColl.updateOne(query, { $set: { status } }),
-          email
-            ? usersColl.updateOne({ email }, { $set: { role } })
-            : Promise.resolve(),
-        ];
+          if (!riderUser) {
+            return res.status(404).json({ error: "Rider not found" });
+          }
 
-        const [riderUpdateResult] = await Promise.all(updates);
+          const { email } = riderUser;
+          const role = status === "active" ? "rider" : "user";
 
-        res.json({ success: true, updated: riderUpdateResult.modifiedCount });
-      } catch (error) {
-        console.error("Error updating rider:", error);
-        res.status(500).json({ error: "Internal server error" });
+          const updates = [
+            ridersColl.updateOne(query, { $set: { status } }),
+            email
+              ? usersColl.updateOne({ email }, { $set: { role } })
+              : Promise.resolve(),
+          ];
+
+          const [riderUpdateResult] = await Promise.all(updates);
+
+          res.json({ success: true, updated: riderUpdateResult.modifiedCount });
+        } catch (error) {
+          console.error("Error updating rider:", error);
+          res.status(500).json({ error: "Internal server error" });
+        }
       }
-    });
+    );
 
     app.delete("/riders/:id", verifyFirebaseToken, async (req, res) => {
       try {
