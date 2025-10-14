@@ -76,7 +76,7 @@ async function run() {
       next();
     };
 
-    const verifryAdmin = async (req, res, next) => {
+    const verifyAdmin = async (req, res, next) => {
       try {
         const role = req.user.role;
         if (!role || role !== "admin")
@@ -156,16 +156,13 @@ async function run() {
       }
     });
 
-    app.get("/riders", verifyFirebaseToken, verifryAdmin, async (req, res) => {
+    app.get("/riders", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       try {
-        const status = req.query.status;
+        const { status } = req.query;
         let query = {};
 
-        if (status) {
-          query = { status };
-        } else {
-          query = { status: { $ne: "pending" } };
-        }
+        if (status) query.status = status;
+        else if (status) query = { status: { $ne: "pending" } };
 
         const riders = await ridersColl.find(query).toArray();
         res.status(200).json(riders);
@@ -175,10 +172,31 @@ async function run() {
       }
     });
 
+    app.get(
+      "/riders/available",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { status, warehouse_district } = req.query;
+          let query = {};
+
+          if (status) query.status = status;
+          if (warehouse_district) query.warehouse_district = warehouse_district;
+
+          const riders = await ridersColl.find(query).toArray();
+          res.status(200).json(riders);
+        } catch (error) {
+          console.error("Error fetching riders:", error);
+          res.status(500).json({ error: "Failed to fetch riders" });
+        }
+      }
+    );
+
     app.patch(
       "/riders/:id",
       verifyFirebaseToken,
-      verifryAdmin,
+      verifyAdmin,
       async (req, res) => {
         const { id } = req.params;
         const { status } = req.query;
@@ -314,10 +332,31 @@ async function run() {
     });
 
     // parcel related api
+    app.get(
+      "/my-parcels",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const email = getUserEmail(req, res);
+          const query = { created_by: email };
+          const parcels = await parcelsColl.find(query).toArray();
+          res.status(200).json(parcels);
+        } catch (err) {
+          res.status(500).json({ error: "Failed to fetch parcels" });
+        }
+      }
+    );
+
     app.get("/parcels", verifyFirebaseToken, async (req, res) => {
       try {
-        const email = getUserEmail(req, res);
-        const query = { created_by: email };
+        const { email, delivery_status, payment_status } = req.query;
+
+        let query = {};
+        if (email) query.created_by = email;
+        if (delivery_status) query.delivery_status = delivery_status;
+        if (payment_status) query.payment_status = payment_status;
+
         const parcels = await parcelsColl.find(query).toArray();
         res.status(200).json(parcels);
       } catch (err) {
@@ -374,6 +413,48 @@ async function run() {
         res.status(500).json({ error: "Failed to update parcel!" });
       }
     });
+
+    app.put(
+      "/parcels/:id/assign",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const parcelId = req.params.id;
+          const riderInfo = req.body;
+
+          // make sure rider info is provided
+          if (!riderInfo || !riderInfo.email) {
+            return res
+              .status(400)
+              .json({ error: "Rider information is missing!" });
+          }
+
+          const query = { _id: new ObjectId(parcelId) };
+          const updateDoc = {
+            $set: {
+              delivery_status: "way-to-collect",
+              assigned_rider: riderInfo,
+              assigned_at: new Date(),
+            },
+          };
+
+          const result = await parcelsColl.updateOne(query, updateDoc);
+
+          if (result.matchedCount === 0) {
+            return res.status(404).json({ error: "Parcel not found!" });
+          }
+
+          res.status(200).json({
+            success: true,
+            message: "Rider assigned successfully!",
+          });
+        } catch (error) {
+          console.error("Error assigning rider:", error);
+          res.status(500).json({ error: "Failed to assign rider!" });
+        }
+      }
+    );
 
     app.delete("/parcels/:id", verifyFirebaseToken, async (req, res) => {
       try {
