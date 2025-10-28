@@ -88,6 +88,18 @@ async function run() {
       }
     };
 
+    const verifyRider = async (req, res, next) => {
+      try {
+        const role = req.user.role;
+        if (!role || role !== "rider")
+          return res.status(403).json({ message: "Forbidden access" });
+
+        next();
+      } catch (error) {
+        return res.status(500).json({ message: "Internal Server Error" });
+      }
+    };
+
     // test route
     app.get("/", (req, res) => {
       res.status(200).send("ProFast server is running");
@@ -248,6 +260,146 @@ async function run() {
       }
     });
 
+    // rider only
+    app.get(
+      "/rider/parcels",
+      verifyFirebaseToken,
+      verifyRider,
+      async (req, res) => {
+        try {
+          const email = req.user.email;
+
+          const query = {
+            "assigned_rider.email": email,
+            delivery_status: { $in: ["way-to-collect", "in-transit"] },
+          };
+
+          const riderParcels = await parcelsColl
+            .find(query)
+            .sort({ createdAt: -1 })
+            .toArray();
+
+          res.status(200).send(riderParcels);
+        } catch (error) {
+          console.log(error);
+          res.status(500).json({ message: "Internal Server Error" });
+        }
+      }
+    );
+
+    app.patch(
+      "/rider/parcels/:id",
+      verifyFirebaseToken,
+      verifyRider,
+      async (req, res) => {
+        try {
+          const parcelId = req.params.id;
+          const email = req.user.email;
+          const { delivery_status } = req.body;
+
+          console.log(delivery_status);
+
+          // Validation
+          const allowedStatuses = ["in-transit", "delivered"];
+          if (!allowedStatuses.includes(delivery_status)) {
+            return res
+              .status(400)
+              .json({ message: "Invalid delivery status." });
+          }
+
+          // Validation: Check the parcel rider
+          const parcel = await parcelsColl.findOne({
+            _id: new ObjectId(parcelId),
+            "assigned_rider.email": email,
+          });
+
+          if (!parcel) {
+            return res
+              .status(404)
+              .json({ message: "Parcel not found or unauthorized." });
+          }
+
+          // update delivery status
+          const updateResult = await parcelsColl.updateOne(
+            { _id: new ObjectId(parcelId) },
+            { $set: { delivery_status } }
+          );
+
+          if (updateResult.modifiedCount === 0) {
+            return res.status(400).json({ message: "No changes applied." });
+          }
+
+          res
+            .status(200)
+            .json({ message: "Delivery status updated successfully." });
+        } catch (error) {
+          console.error("Error updating parcel status:", error);
+          res
+            .status(500)
+            .json({ message: "Server error", error: error.message });
+        }
+      }
+    );
+
+    app.get(
+      "/rider/parcels/delivered",
+      verifyFirebaseToken,
+      verifyRider,
+      async (req, res) => {
+        try {
+          const email = req.user.email;
+
+          const query = {
+            "assigned_rider.email": email,
+            delivery_status: "delivered",
+          };
+
+          const deliveredParcels = await parcelsColl
+            .find(query)
+            .sort({ createdAt: -1 })
+            .toArray();
+
+          res.status(200).send(deliveredParcels);
+        } catch (error) {
+          console.error(error);
+          res.status(500).json({ message: "Internal Server Error" });
+        }
+      }
+    );
+
+    app.patch(
+      "/rider/parcels/:id/cashout",
+      verifyFirebaseToken,
+      verifyRider,
+      async (req, res) => {
+        try {
+          const parcelId = req.params.id;
+          const email = req.user.email;
+
+          const filter = {
+            _id: new ObjectId(parcelId),
+            "assigned_rider.email": email,
+          };
+
+          const update = {
+            $set: { cashout_status: "cashed_out" },
+          };
+
+          const result = await parcelsColl.updateOne(filter, update);
+
+          if (result.modifiedCount === 0)
+            return res
+              .status(404)
+              .json({ message: "Parcel not found or already cashed out" });
+
+          res.status(200).json({ message: "Cashout successful" });
+        } catch (error) {
+          console.error(error);
+          res.status(500).json({ message: "Internal Server Error" });
+        }
+      }
+    );
+
     // stripe payment apis
     app.post("/create-payment-intent", async (req, res) => {
       try {
@@ -332,6 +484,37 @@ async function run() {
     });
 
     // parcel related api
+
+    app.get("/parcels/status-count", async (req, res) => {
+      try {
+        // Group by delivery_status
+        const pipeline = [
+          {
+            $group: {
+              _id: "$delivery_status",
+              count: { $sum: 1 },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              status: "$_id",
+              count: 1,
+            },
+          },
+          {
+            $sort: { status: 1 },
+          },
+        ];
+        const result = await parcelsColl.aggregate(pipeline).toArray();
+
+        res.status(200).json(result);
+      } catch (error) {
+        console.error("Error getting parcel status counts:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     app.get(
       "/my-parcels",
       verifyFirebaseToken,
