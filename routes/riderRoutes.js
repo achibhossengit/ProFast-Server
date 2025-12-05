@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { verifyFirebaseToken } = require("../middleware/auth");
-const { verifyAdmin, verifyRider } = require("../middleware/role");
+const { verifyFirebaseToken, verifyAdmin, verifyRider } = require("../middleware/auth");
 const {
   applyRider,
   getRiders,

@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { verifyFirebaseToken } = require("../middleware/auth");
-const { verifyAdmin } = require("../middleware/role");
+const { verifyFirebaseToken, verifyAdmin } = require("../middleware/auth");
 const {
   getStatusCount,
   getMyParcels,

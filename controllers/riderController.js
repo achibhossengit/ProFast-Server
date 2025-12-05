@@ -1,6 +1,6 @@
 const applyRider = async (req, res) => {
   try {
-    const email = getUserEmail(req, res);
+    const email = getUserEmailUtil(req, res);
     const existing = await ridersColl.findOne({ email });
     if (existing) return res.status(409).json({ message: "You have already applied." });
 

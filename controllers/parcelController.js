@@ -1,6 +1,6 @@
 const { client } = require("../config/db");
 const { ObjectId } = require("mongodb");
-const { getUserEmail } = require("../middleware/utils");
+const { getUserEmailUtil } = require("../middleware/utils");
 
 const parcelsColl = client.db("ProFastDB").collection("parcels");
 
@@ -22,7 +22,7 @@ const getStatusCount = async (req, res) => {
 
 const getMyParcels = async (req, res) => {
   try {
-    const email = getUserEmail(req, res);
+    const email = getUserEmailUtil(req, res);
     const parcels = await parcelsColl.find({ created_by: email }).toArray();
     res.status(200).json(parcels);
   } catch (error) {
@@ -46,7 +46,7 @@ const getParcels = async (req, res) => {
 
 const getParcelById = async (req, res) => {
   try {
-    const email = getUserEmail(req, res);
+    const email = getUserEmailUtil(req, res);
     const id = req.params.id;
     const query = { _id: new ObjectId(id), created_by: email };
     const result = await parcelsColl.findOne(query);
@@ -59,7 +59,7 @@ const getParcelById = async (req, res) => {
 
 const createParcel = async (req, res) => {
   try {
-    const email = getUserEmail(req, res);
+    const email = getUserEmailUtil(req, res);
     const parcelData = { ...req.body, created_by: email };
     const result = await parcelsColl.insertOne(parcelData);
     res.status(201).json(result);
@@ -70,7 +70,7 @@ const createParcel = async (req, res) => {
 
 const updateParcel = async (req, res) => {
   try {
-    const email = getUserEmail(req, res);
+    const email = getUserEmailUtil(req, res);
     const id = req.params.id;
     const updatedData = req.body;
     delete updatedData._id;
@@ -111,7 +111,7 @@ const assignRider = async (req, res) => {
 
 const deleteParcel = async (req, res) => {
   try {
-    const email = getUserEmail(req, res);
+    const email = getUserEmailUtil(req, res);
     const id = req.params.id;
     const query = { _id: new ObjectId(id), created_by: email };
     const result = await parcelsColl.deleteOne(query);

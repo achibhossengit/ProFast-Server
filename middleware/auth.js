@@ -1,7 +1,5 @@
 const { admin } = require("../config/firebase");
-const { client } = require("../config/db");
-
-const usersColl = client.db("ProFastDB").collection("users");
+const { getUserRoleUtil } = require("./utils");
 
 const verifyFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -12,13 +10,7 @@ const verifyFirebaseToken = async (req, res, next) => {
   const accessToken = authHeader.split(" ")[1];
   try {
     const decodedToken = await admin.auth().verifyIdToken(accessToken);
-    const { email } = decodedToken;
-    const authUser = await usersColl.findOne({ email }, { projection: { role: 1 } });
-
-    if (!authUser) return res.status(401).json({ error: "User not found." });
-
     req.user = decodedToken;
-    req.user.role = authUser.role;
     next();
   } catch (error) {
     console.error("Token verification failed:", error);
@@ -26,4 +18,44 @@ const verifyFirebaseToken = async (req, res, next) => {
   }
 };
 
-module.exports = { verifyFirebaseToken };
+// call them after verifyFirebaseToken
+const verifyAdmin = async (req, res, next) => {
+  try {
+    const role = await getUserRoleUtil(req);
+    if (role === "admin") {
+      return next();
+    }
+    return res.status(403).json({ error: "Forbidden: Admins only" });
+  } catch (error) {
+    console.error("Token role verification failed:", error);
+    return res.status(401).json({ error: "Invalid Token" });
+  }
+};
+
+const verifyRider = async (req, res, next) => {
+  try {
+    const role = await getUserRoleUtil(req);
+    if (role === "rider") {
+      return next();
+    }
+    return res.status(403).json({ error: "Forbidden: Riders only" });
+  } catch (error) {
+    console.error("Token role verification failed:", error);
+    return res.status(401).json({ error: "Invalid Token" });
+  }
+};
+
+const verifyUser = async (req, res, next) => {
+  try {
+    const role = await getUserRoleUtil(req);
+    if (role === "user") {
+      return next();
+    }
+    return res.status(403).json({ error: "Forbidden: Users only" });
+  } catch (error) {
+    console.error("Token role verification failed:", error);
+    return res.status(401).json({ error: "Invalid Token" });
+  }
+};
+
+module.exports = { verifyFirebaseToken, verifyAdmin, verifyRider, verifyUser };

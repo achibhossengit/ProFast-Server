@@ -1,6 +1,6 @@
 const { client } = require("../config/db");
 const { ObjectId } = require("mongodb");
-const { getUserEmail } = require("../middleware/utils");
+const { getUserEmailUtil } = require("../middleware/utils");
 const { createStripePaymentIntent } = require("../services/stripeService");
 
 const paymentsColl = client.db("ProFastDB").collection("payments");
@@ -20,7 +20,7 @@ const createPaymentIntent = async (req, res) => {
 
 const savePayment = async (req, res) => {
   try {
-    const email = getUserEmail(req, res);
+    const email = getUserEmailUtil(req, res);
     const { parcelId, transactionId, amount, currency, status, paymentMethod } = req.body;
     if (!parcelId || !transactionId || !amount) {
       return res.status(400).json({ error: "Missing payment details" });
@@ -54,7 +54,7 @@ const savePayment = async (req, res) => {
 
 const getPayments = async (req, res) => {
   try {
-    const email = getUserEmail(req, res);
+    const email = getUserEmailUtil(req, res);
     const payments = await paymentsColl.find({ userEmail: email }).sort({ createdAt: -1 }).toArray();
     res.status(200).json(payments);
   } catch (error) {
