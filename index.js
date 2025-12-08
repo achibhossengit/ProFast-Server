@@ -8,6 +8,7 @@ const userRoutes = require("./routes/userRoutes");
 const riderRoutes = require("./routes/riderRoutes");
 const parcelRoutes = require("./routes/parcelRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+const warehouseRoutes = require("./routes/wareHousesRoute");
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -24,6 +25,7 @@ app.use("/users", userRoutes);
 app.use("/riders", riderRoutes);
 app.use("/parcels", parcelRoutes);
 app.use("/payments", paymentRoutes);
+app.use("/warehouseColl", warehouseRoutes);
 
 // Test route
 app.get("/", (req, res) => res.send("ProFast server is running"));

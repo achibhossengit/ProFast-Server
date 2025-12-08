@@ -13,7 +13,6 @@ const verifyFirebaseToken = async (req, res, next) => {
     req.user = decodedToken;
     next();
   } catch (error) {
-    console.error("Token verification failed:", error);
     return res.status(401).json({ error: "Invalid Token" });
   }
 };
