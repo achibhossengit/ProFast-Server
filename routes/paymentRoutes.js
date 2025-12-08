@@ -7,7 +7,7 @@ const {
   getPayments,
 } = require("../controllers/paymentController");
 
-router.post("/create-intent", createPaymentIntent);
+router.post("/create-intent", verifyFirebaseToken, createPaymentIntent);
 router.post("/", verifyFirebaseToken, savePayment);
 router.get("/", verifyFirebaseToken, getPayments);
 
