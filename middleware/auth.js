@@ -57,4 +57,11 @@ const verifyUser = async (req, res, next) => {
   }
 };
 
-module.exports = { verifyFirebaseToken, verifyAdmin, verifyRider, verifyUser };
+function demoBlocker(req, res, next) {
+  return res.status(403).json({
+    message: "This feature is disabled in demo mode."
+  });
+}
+
+
+module.exports = { verifyFirebaseToken, verifyAdmin, verifyRider, verifyUser, demoBlocker };
